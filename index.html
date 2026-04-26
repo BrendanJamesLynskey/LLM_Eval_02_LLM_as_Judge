@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eval 02 — LLM as Judge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0a;
+            --bg-card: #0d1117;
+            --bg-code: #161b22;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent: #76B900;
+            --accent-dim: #76B90044;
+            --accent-glow: #76B90033;
+            --border: #21262d;
+            --font-display: 'Space Grotesk', sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+            --font-body: 'Inter', sans-serif;
+            --max-width: 900px;
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: var(--font-body);
+            font-size: 17px;
+            line-height: 1.7;
+            overflow-x: hidden;
+        }
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem 1.5rem;
+            text-align: center;
+            position: relative;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .hero > * { position: relative; z-index: 1; }
+        .series-label {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+        .hero h1 {
+            font-family: var(--font-display);
+            font-size: clamp(2rem, 5vw, 3.2rem);
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+            margin-bottom: 1rem;
+        }
+        .hero h1 .accent { color: var(--accent); }
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            margin-bottom: 2rem;
+        }
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: center;
+            margin-bottom: 2.5rem;
+        }
+        .tag {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            background: var(--accent-dim);
+            white-space: nowrap;
+        }
+        .pipeline {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.25rem;
+            margin-bottom: 1rem;
+            max-width: var(--max-width);
+        }
+        .pipeline-step {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            padding: 0.3rem 0.7rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .pipeline-arrow { color: var(--accent); font-size: 0.9rem; font-weight: 700; }
+        .slide {
+            min-height: 100vh;
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 4rem 1.5rem;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .slide-number {
+            font-family: var(--font-display);
+            font-size: 5rem;
+            font-weight: 700;
+            color: var(--accent-dim);
+            position: absolute;
+            top: 2rem;
+            right: 1.5rem;
+            line-height: 1;
+            user-select: none;
+        }
+        .slide h2 {
+            font-family: var(--font-display);
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 1.5rem;
+            line-height: 1.25;
+        }
+        .slide h3 {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .slide p { margin-bottom: 1rem; color: var(--text-secondary); }
+        .slide p strong { color: var(--text-primary); }
+        .slide ul, .slide ol { margin-bottom: 1rem; padding-left: 1.5rem; color: var(--text-secondary); }
+        .slide li { margin-bottom: 0.4rem; }
+        .slide li strong { color: var(--text-primary); }
+        .slide code {
+            font-family: var(--font-mono);
+            font-size: 0.88em;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            padding: 0.05rem 0.35rem;
+            border-radius: 3px;
+            color: #c9d1d9;
+        }
+        .code-block {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin: 1.25rem 0;
+            overflow: hidden;
+        }
+        .code-header {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent);
+            background: rgba(118, 185, 0, 0.08);
+            padding: 0.4rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .code-block pre { margin: 0; padding: 1rem; overflow-x: auto; }
+        .code-block code {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.6;
+            color: #c9d1d9;
+            background: transparent;
+            border: none;
+            padding: 0;
+        }
+        .kw { color: #ff7b72; }
+        .fn { color: #d2a8ff; }
+        .str { color: #a5d6ff; }
+        .cm { color: #8b949e; font-style: italic; }
+        .num { color: #79c0ff; }
+        .type { color: #ffa657; }
+        .dir { color: #ff7b72; }
+        .mac { color: #ffa657; }
+        .table-wrap {
+            overflow-x: auto;
+            margin: 1.25rem 0;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th {
+            background: var(--bg-code);
+            color: var(--accent);
+            font-weight: 600;
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            font-family: var(--font-display);
+            white-space: nowrap;
+        }
+        td {
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        tr:last-child td { border-bottom: none; }
+        tr:nth-child(even) td { background: rgba(13, 17, 23, 0.5); }
+        .diagram-flow {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .diagram-box {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            text-align: center;
+            white-space: nowrap;
+        }
+        .diagram-box.accent { border-color: var(--accent); color: var(--accent); background: rgba(118, 185, 0, 0.08); }
+        .diagram-box.dim { color: var(--text-secondary); border-color: var(--border); }
+        .diagram-arrow { color: var(--accent); font-size: 1.3rem; font-weight: 700; }
+        .diagram-vertical {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.3rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .diagram-vertical .diagram-arrow { font-size: 1.1rem; }
+        .hierarchy {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .hierarchy-level { display: flex; align-items: center; gap: 0.75rem; }
+        .hierarchy-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            min-width: 80px;
+            text-align: right;
+        }
+        .hierarchy-items { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .hierarchy-item {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        .hierarchy-item.accent { border-color: var(--accent); color: var(--accent); background: rgba(118, 185, 0, 0.08); }
+        .diagram-grid {
+            display: grid;
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+        .diagram-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+        .diagram-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+        .diagram-panel {
+            padding: 1rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+        .diagram-panel.accent-border { border-left: 3px solid var(--accent); }
+        .diagram-panel h4 {
+            font-family: var(--font-display);
+            font-size: 1rem;
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+        .diagram-panel p, .diagram-panel ul { font-size: 0.85rem; }
+        .callout {
+            background: var(--bg-card);
+            border-left: 3px solid var(--accent);
+            border-radius: 0 8px 8px 0;
+            padding: 1rem 1.25rem;
+            margin: 1.25rem 0;
+        }
+        .callout p { margin-bottom: 0; }
+        .callout p + p { margin-top: 0.5rem; }
+        .callout .callout-label {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 0.3rem;
+        }
+        .contents-list { list-style: none; padding-left: 0; counter-reset: contents; }
+        .contents-list li {
+            counter-increment: contents;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .contents-list li:last-child { border-bottom: none; }
+        .contents-list li::before {
+            content: counter(contents, decimal-leading-zero);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent);
+            min-width: 2rem;
+        }
+        .contents-list a { color: var(--text-primary); text-decoration: none; transition: color 0.2s; }
+        .contents-list a:hover { color: var(--accent); }
+        .footer {
+            text-align: center;
+            padding: 3rem 1.5rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+            max-width: var(--max-width);
+            margin: 0 auto;
+        }
+        .footer a { color: var(--accent); text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
+        .canvas-wrap {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1.25rem 0;
+            overflow-x: auto;
+        }
+        .canvas-wrap canvas, .canvas-wrap svg { display: block; margin: 0 auto; max-width: 100%; }
+        .badge {
+            display: inline-block;
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+            padding: 0.1rem 0.45rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            vertical-align: middle;
+            margin-left: 0.3rem;
+        }
+        .badge.ok    { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+        .badge.warn  { border-color: #ffa657; color: #ffa657; background: rgba(255,166,87,0.08); }
+        .badge.bad   { border-color: #ff7b72; color: #ff7b72; background: rgba(255,123,114,0.08); }
+        @media (max-width: 640px) {
+            .slide { padding: 3rem 1rem; min-height: auto; }
+            .slide-number { font-size: 3rem; top: 1.5rem; right: 1rem; }
+            .slide h2 { font-size: 1.5rem; }
+            .diagram-grid.cols-2, .diagram-grid.cols-3 { grid-template-columns: 1fr; }
+            .pipeline { gap: 0.15rem; }
+            .pipeline-step { font-size: 0.6rem; padding: 0.2rem 0.4rem; }
+            .hero h1 { font-size: 1.8rem; }
+            table { font-size: 0.78rem; }
+        }
+    </style>
+</head>
+<body>
+<header class="hero">
+    <div class="series-label">LLM Evaluations Series &mdash; Presentation 02</div>
+    <h1>LLM <span class="accent">as Judge</span></h1>
+    <p class="subtitle">Pairwise vs scoring, biases (positional, verbosity, self-preference, sycophancy), calibration against ground truth, constitutional eval, and cost vs quality trade-offs across judge models.</p>
+    <div class="tags">
+        <span class="tag">Pairwise</span>
+        <span class="tag">Likert</span>
+        <span class="tag">Positional Bias</span>
+        <span class="tag">Verbosity Bias</span>
+        <span class="tag">Self-Preference</span>
+        <span class="tag">Constitutional</span>
+        <span class="tag">Calibration</span>
+    </div>
+    <div class="pipeline">
+        <span class="pipeline-step">Judge Prompt</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Scoring Mode</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Bias Check</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Mitigation</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Calibrate</span>
+        <span class="pipeline-arrow">&rarr;</span>
+        <span class="pipeline-step">Deploy</span>
+    </div>
+</header>
+
+<section class="slide" id="slide-00">
+    <div class="slide-number">00</div>
+    <h2>Topics We'll Cover</h2>
+    <ul class="contents-list">
+        <li><a href="#slide-01">When You Can't Write a Function for &ldquo;Good&rdquo;</a></li>
+        <li><a href="#slide-02">Pairwise vs Scoring &mdash; A/B vs Likert</a></li>
+        <li><a href="#slide-03">Prompt Patterns for Judges &mdash; Rubric, Exemplars, CoT</a></li>
+        <li><a href="#slide-04">Known Biases &mdash; Positional, Verbosity, Self-Preference, Sycophancy</a></li>
+        <li><a href="#slide-05">Mitigating Biases &mdash; Randomisation, Multi-Judge, Bias Correction</a></li>
+        <li><a href="#slide-06">Calibrating Judges &mdash; Ground-Truth Alignment</a></li>
+        <li><a href="#slide-07">Constitutional Eval &mdash; Multi-Criteria with Explicit Principles</a></li>
+        <li><a href="#slide-08">Cost vs Quality &mdash; Sonnet vs Opus vs Open Models as Judges</a></li>
+        <li><a href="#slide-09">What to Take Away</a></li>
+    </ul>
+</section>
+
+<section class="slide" id="slide-01">
+    <div class="slide-number">01</div>
+    <h2>When You Can't Write a Function for &ldquo;Good&rdquo;</h2>
+    <p>Reference-based eval fails at scale for open-ended tasks: summarisation, dialogue, instruction following, code explanation. You can't enumerate all correct paraphrases of a summary. ROUGE-L correlation with human judgement for abstractive summarisation sits at ~0.3&ndash;0.4 &mdash; barely better than random for many tasks.</p>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Where reference-based breaks</h4>
+            <ul>
+                <li>Open-ended generation (creative, explanatory)</li>
+                <li>Multiple valid response paths (paraphrase-equivalent)</li>
+                <li>Long-form where token-level overlap is noisy</li>
+                <li>Tasks with no human gold answer available</li>
+            </ul>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Where LLM judge adds value</h4>
+            <ul>
+                <li>Instruction-following fidelity</li>
+                <li>Factual consistency (hallucination detection)</li>
+                <li>Tone, style, audience-appropriateness</li>
+                <li>Safety and policy compliance at scale</li>
+                <li>Pairwise ranking for A/B model selection</li>
+            </ul>
+        </div>
+    </div>
+
+    <p>The Zheng et al. MT-Bench paper (2023) reported GPT-4-as-judge agreement with human expert ratings of <strong>80&nbsp;%</strong> on pairwise preferences and <strong>85&nbsp;%</strong> on absolute scoring &mdash; comparable to inter-human agreement (81&nbsp;%). This is the empirical basis for widespread adoption, but that number comes with caveats: the eval set was English-only, the tasks were conversational, and GPT-4 was evaluating responses from models weaker than itself.</p>
+
+    <div class="callout">
+        <div class="callout-label">The calibration prerequisite</div>
+        <p>An LLM judge is only trustworthy if it has been calibrated against human labels on your specific task distribution. A judge that agrees 85&nbsp;% on MT-Bench may agree only 60&nbsp;% on your specialised domain. Measure first; trust second.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-02">
+    <div class="slide-number">02</div>
+    <h2>Pairwise vs Scoring &mdash; A/B vs Likert</h2>
+    <p>Two fundamental scoring paradigms with different statistical properties and different sensitivity to judge biases.</p>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Pairwise (A vs B)</h4>
+            <p>Judge sees <em>two</em> responses to the same prompt and outputs a preference: A wins, B wins, or tie. Produces a <strong>relative ranking</strong>. Naturally suited to model selection decisions. Can be aggregated via Bradley-Terry or Elo.</p>
+            <p><strong>Pros:</strong> easier for judge to decide than absolute quality; less calibration needed; maps directly to &ldquo;is candidate better than baseline?&rdquo;</p>
+            <p><strong>Cons:</strong> O(n&sup2;) comparisons for a full ranking; can't compare models not directly paired; ties ambiguous.</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Scoring / Likert (absolute)</h4>
+            <p>Judge sees <em>one</em> response and assigns a score on a defined scale, e.g. 1&ndash;5 or 1&ndash;10. Produces an <strong>absolute quality estimate</strong>. Naturally suited to monitoring thresholds.</p>
+            <p><strong>Pros:</strong> O(n) calls; supports time-series trending; can gate on minimum quality threshold.</p>
+            <p><strong>Cons:</strong> more sensitive to judge calibration errors; inter-judge variance on middle scores is high; anchoring effects from scale choice.</p>
+        </div>
+    </div>
+
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Use case</th><th>Recommended mode</th><th>Rationale</th></tr></thead>
+            <tbody>
+                <tr><td>Choosing between two model versions</td><td>Pairwise</td><td>Direct relative signal; doesn't require absolute calibration</td></tr>
+                <tr><td>Regression CI &mdash; catch quality drops</td><td>Scoring (1&ndash;5)</td><td>O(n) cost; threshold alerting on absolute score</td></tr>
+                <tr><td>Production monitoring dashboard</td><td>Scoring</td><td>Time-series friendly; daily average over sampled traffic</td></tr>
+                <tr><td>Model leaderboard</td><td>Pairwise + Elo/BT</td><td>Transitive, handles partial tournament graphs</td></tr>
+                <tr><td>Human preference study</td><td>Pairwise</td><td>Humans more consistent on relative judgements</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="slide" id="slide-03">
+    <div class="slide-number">03</div>
+    <h2>Prompt Patterns for Judges &mdash; Rubric, Exemplars, CoT</h2>
+    <p>Judge prompt quality is the single largest determinant of judge accuracy. Three proven patterns, in order of increasing reliability.</p>
+
+    <div class="code-block">
+        <div class="code-header">Pattern 1: Rubric-only (fastest, lowest accuracy)</div>
+<pre><code><span class="cm">### System</span>
+<span class="str">You are an expert evaluator. Score the assistant's response on a scale of
+1&ndash;5 where:
+  5 = Fully correct, complete, well-structured
+  4 = Correct with minor omissions
+  3 = Partially correct but missing key elements
+  2 = Mostly wrong but shows some understanding
+  1 = Completely incorrect or harmful
+Return only {"score": N}.</span>
+
+<span class="cm">### User</span>
+<span class="str">Prompt: {prompt}
+Response: {response}</span></code></pre>
+    </div>
+
+    <div class="code-block">
+        <div class="code-header">Pattern 2: Rubric + Exemplars (recommended baseline)</div>
+<pre><code><span class="cm">### System (same rubric as above, then:)</span>
+<span class="str">Examples:
+Score 5: "The transformer attention mechanism computes Q, K, V projections
+  from the input, then softmax(QK^T / sqrt(d_k)) V..."  [CORRECT, detailed]
+Score 2: "Transformers use attention to focus on words."  [too vague]
+Score 1: "Transformers are a type of power supply."  [wrong domain]</span></code></pre>
+    </div>
+
+    <div class="code-block">
+        <div class="code-header">Pattern 3: CoT + structured output (highest accuracy, 2&times; tokens)</div>
+<pre><code><span class="cm">### System</span>
+<span class="str">Evaluate the response step by step:
+1. Identify the core claim the response makes.
+2. Check each factual claim for correctness.
+3. Assess completeness against the prompt requirements.
+4. Assign a score 1&ndash;5 using the rubric below.
+5. Output:  {"reasoning": "...", "score": N}
+
+{rubric}</span></code></pre>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">CoT reliability data</div>
+        <p>Zheng et al. found that asking the judge to produce a CoT rationale before the score improved agreement with humans by 4&ndash;7&nbsp;pp on ambiguous items. The reasoning also makes failures auditable &mdash; you can inspect <em>why</em> the judge scored an item incorrectly, which is essential for debugging systematic biases.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-04">
+    <div class="slide-number">04</div>
+    <h2>Known Biases &mdash; Positional, Verbosity, Self-Preference, Sycophancy</h2>
+    <p>These four biases are documented across multiple independent studies. Any eval pipeline that ignores them will produce systematically distorted results.</p>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Positional bias</h4>
+            <p>In pairwise eval, judges systematically prefer the response in position A (first-presented) regardless of quality. Effect size: GPT-4 showed 10&ndash;15&nbsp;pp preference for position A in MT-Bench blind tests. Mitigation: swap A/B order and take majority; discard ties from swapped pairs.</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Verbosity bias</h4>
+            <p>Judges assign higher scores to longer responses even when the additional content is filler, repetition, or off-topic elaboration. Measured effect: +0.3&ndash;0.6 Likert points per 100 extra tokens in some studies. Mitigation: normalise instruction to &ldquo;prefer concise and correct over verbose&rdquo;; explicitly penalise unnecessary length in rubric.</p>
+        </div>
+    </div>
+
+    <div class="diagram-grid cols-2">
+        <div class="diagram-panel accent-border">
+            <h4>Self-preference</h4>
+            <p>A model used as judge preferentially rates its own outputs higher than outputs from other models. GPT-4 judging GPT-4 vs Claude 2 showed ~8&nbsp;pp inflated win rate for GPT-4. Mitigation: never use the same model family as both system-under-test and judge; use a different vendor for the judge role.</p>
+        </div>
+        <div class="diagram-panel accent-border">
+            <h4>Sycophancy</h4>
+            <p>If the prompt contains any signal about the user's opinion (e.g. &ldquo;don't you think response B is better?&rdquo;), the judge will conform to that opinion rather than apply the rubric. Also triggered by authority framing (&ldquo;An expert said response A was wrong&rdquo;). Mitigation: strip opinion signals from judge prompts; never include prior scores in the judge context.</p>
+        </div>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">Bias measurement recipe</div>
+        <p>Quantify each bias on your eval set before deploying the judge. For positional: compute win-rate delta between (A,B) and (B,A) order on 100 random pairs &mdash; should be &lt;2&nbsp;pp if mitigated. For verbosity: regress score against response length on matched-quality pairs &mdash; coefficient should not exceed 0.01 Likert points/token. For self-preference: run with and without vendor-match and compare win rates.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-05">
+    <div class="slide-number">05</div>
+    <h2>Mitigating Biases &mdash; Randomisation, Multi-Judge, Bias Correction</h2>
+
+    <h3>Randomisation (cheapest fix)</h3>
+    <p>For pairwise eval: run each comparison twice with swapped order. Declare winner only if both runs agree; count disagreements as ties. This eliminates positional bias at the cost of 2&times; judge calls.</p>
+
+    <div class="code-block">
+        <div class="code-header">swap_and_agree.py</div>
+<pre><code><span class="kw">def</span> <span class="fn">pairwise_debiased</span>(judge, prompt, resp_a, resp_b) -&gt; <span class="type">str</span>:
+    <span class="str">"""Returns 'A', 'B', or 'tie'."""</span>
+    r1 = judge.<span class="fn">compare</span>(prompt, a=resp_a, b=resp_b)  <span class="cm"># "A" or "B"</span>
+    r2 = judge.<span class="fn">compare</span>(prompt, a=resp_b, b=resp_a)  <span class="cm"># swap order</span>
+    <span class="kw">if</span> r1 == <span class="str">"A"</span> <span class="kw">and</span> r2 == <span class="str">"B"</span>:   <span class="cm"># both say resp_a wins</span>
+        <span class="kw">return</span> <span class="str">"A"</span>
+    <span class="kw">elif</span> r1 == <span class="str">"B"</span> <span class="kw">and</span> r2 == <span class="str">"A"</span>: <span class="cm"># both say resp_b wins</span>
+        <span class="kw">return</span> <span class="str">"B"</span>
+    <span class="kw">else</span>:
+        <span class="kw">return</span> <span class="str">"tie"</span></code></pre>
+    </div>
+
+    <h3>Multi-judge ensembling</h3>
+    <p>Use 3 independent judges (different model families or different temperature/prompt seeds) and take a majority vote. Reduces variance by ~40&nbsp;% vs single-judge on adversarial items. Cost: 3&times; inference. Practical pattern: cheap judge (Sonnet) for first pass, expensive judge (Opus / GPT-4o) only for items where cheap judge score is in the middle two quintiles.</p>
+
+    <h3>Bias correction via regression</h3>
+    <p>Collect 500 human-annotated items. Fit a linear model: <code>corrected_score = judge_score + &beta;_1 &times; len(response) + &beta;_2 &times; position_flag + &beta;_3 &times; vendor_match</code>. Apply correction coefficients to all subsequent judge scores. Re-fit quarterly as judge model versions change.</p>
+
+    <div class="callout">
+        <div class="callout-label">Diminishing returns</div>
+        <p>Swapped-order randomisation is high-ROI and should always be used for pairwise. Multi-judge beyond 3 gives marginal gains &mdash; the correlation between judge 3 and judge 4 often exceeds 0.9. Bias-correction regression is only worthwhile once you have &gt;300 ground-truth annotations.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-06">
+    <div class="slide-number">06</div>
+    <h2>Calibrating Judges &mdash; Ground-Truth Alignment</h2>
+    <p>A judge is calibrated when its scores are linearly related to human ground truth with high agreement and low systematic offset. Calibration is not optional &mdash; it's the difference between a useful metric and an expensive noise generator.</p>
+
+    <div class="canvas-wrap">
+        <svg viewBox="0 0 720 280" width="720" height="280" xmlns="http://www.w3.org/2000/svg">
+            <style>
+                .ax  { stroke: #30363d; stroke-width: 1; }
+                .gl  { stroke: #76B900; stroke-width: 1.5; }
+                .pt  { fill: #76B900; }
+                .ptb { fill: #ff7b72; }
+                .lb  { fill: #8b949e; font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+                .ttl { fill: #76B900; font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px; }
+                .lnw { stroke: #d2a8ff; stroke-width: 1; stroke-dasharray: 4 3; }
+            </style>
+            <text x="10" y="18" class="ttl">Calibration plot &mdash; judge score vs human score (1&ndash;5 Likert)</text>
+
+            <line x1="60" y1="240" x2="660" y2="240" class="ax"/>
+            <line x1="60" y1="240" x2="60"  y2="30"  class="ax"/>
+            <text x="330" y="265" class="lb">human score</text>
+            <text x="10"  y="140" class="lb" transform="rotate(-90,10,140)">judge score</text>
+
+            <text x="50"  y="245" class="lb">1</text>
+            <text x="200" y="245" class="lb">2</text>
+            <text x="360" y="245" class="lb">3</text>
+            <text x="510" y="245" class="lb">4</text>
+            <text x="650" y="245" class="lb">5</text>
+            <text x="40"  y="240" class="lb">1</text>
+            <text x="40"  y="188" class="lb">2</text>
+            <text x="40"  y="136" class="lb">3</text>
+            <text x="40"  y="84"  class="lb">4</text>
+            <text x="40"  y="32"  class="lb">5</text>
+
+            <line x1="60" y1="240" x2="660" y2="32" class="lnw"/>
+
+            <circle cx="80"  cy="225" r="4" class="pt"/>
+            <circle cx="100" cy="215" r="4" class="pt"/>
+            <circle cx="220" cy="190" r="4" class="pt"/>
+            <circle cx="200" cy="195" r="4" class="pt"/>
+            <circle cx="380" cy="140" r="4" class="pt"/>
+            <circle cx="360" cy="150" r="4" class="pt"/>
+            <circle cx="400" cy="135" r="4" class="pt"/>
+            <circle cx="520" cy="88"  r="4" class="pt"/>
+            <circle cx="540" cy="80"  r="4" class="pt"/>
+            <circle cx="650" cy="38"  r="4" class="pt"/>
+
+            <circle cx="180" cy="148" r="4" class="ptb"/>
+            <circle cx="320" cy="200" r="4" class="ptb"/>
+            <circle cx="440" cy="175" r="4" class="ptb"/>
+            <circle cx="560" cy="140" r="4" class="ptb"/>
+
+            <rect x="480" y="30" width="180" height="55" rx="4" style="fill:#161b22;stroke:#30363d"/>
+            <circle cx="495" cy="45" r="4" class="pt"/>
+            <text x="505" y="50" class="lb" style="fill:#e6edf3">calibrated judge</text>
+            <circle cx="495" cy="68" r="4" class="ptb"/>
+            <text x="505" y="73" class="lb" style="fill:#ff7b72">biased judge (verbosity)</text>
+        </svg>
+    </div>
+
+    <h3>Calibration workflow</h3>
+    <ol>
+        <li>Collect <strong>400&ndash;600 human-annotated</strong> (prompt, response, human_score) triples, stratified by category and quality tier.</li>
+        <li>Run the judge on the same items; record judge scores.</li>
+        <li>Compute <strong>Spearman &rho;</strong> and <strong>Kendall &tau;</strong> (robustness to outliers). Target: &rho; &ge; 0.75, &tau; &ge; 0.60.</li>
+        <li>Plot residuals (judge &minus; human) against response length, model family, and category. Any systematic residual pattern reveals an unmitigated bias.</li>
+        <li>Fit a calibration map (linear or isotonic regression) and apply it to judge outputs before reporting metrics.</li>
+        <li>Re-calibrate after any judge model update (new version, new prompt).</li>
+    </ol>
+</section>
+
+<section class="slide" id="slide-07">
+    <div class="slide-number">07</div>
+    <h2>Constitutional Eval &mdash; Multi-Criteria with Explicit Principles</h2>
+    <p>Single-score judging conflates orthogonal quality dimensions. A response can be <em>accurate but harmful</em>, or <em>safe but unhelpful</em>. Constitutional eval decomposes quality into explicitly named, independently scored criteria, each grounded in a stated principle.</p>
+
+    <div class="code-block">
+        <div class="code-header">constitutional_judge_prompt.py</div>
+<pre><code><span class="type">CRITERIA</span> = [
+    {<span class="str">"name"</span>: <span class="str">"accuracy"</span>,     <span class="str">"principle"</span>: <span class="str">"All factual claims are verifiable and correct."</span>},
+    {<span class="str">"name"</span>: <span class="str">"completeness"</span>, <span class="str">"principle"</span>: <span class="str">"The response addresses all parts of the prompt."</span>},
+    {<span class="str">"name"</span>: <span class="str">"safety"</span>,       <span class="str">"principle"</span>: <span class="str">"No harmful, toxic, or policy-violating content."</span>},
+    {<span class="str">"name"</span>: <span class="str">"conciseness"</span>,  <span class="str">"principle"</span>: <span class="str">"No unnecessary repetition or padding."</span>},
+    {<span class="str">"name"</span>: <span class="str">"grounding"</span>,    <span class="str">"principle"</span>: <span class="str">"Claims are grounded in the provided context."</span>},
+]
+
+<span class="type">JUDGE_TEMPLATE</span> = <span class="str">"""
+For each criterion below, score the response 1-5 and give a one-sentence
+rationale. Output JSON with keys matching the criterion names.
+
+Criteria:
+{criteria_block}
+
+Prompt: {prompt}
+Response: {response}
+"""</span>
+
+<span class="cm"># Returned schema:
+# {"accuracy": {"score": 4, "reason": "..."},
+#  "completeness": {"score": 3, "reason": "..."}, ...}</span></code></pre>
+    </div>
+
+    <h3>Aggregation strategies</h3>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Strategy</th><th>Formula</th><th>When to use</th></tr></thead>
+            <tbody>
+                <tr><td>Weighted mean</td><td>&sum;(w_i &times; score_i)</td><td>Known criterion priorities; e.g. safety &times;2, accuracy &times;1.5</td></tr>
+                <tr><td>Minimum gate</td><td>min(score_i) if any &lt; threshold &rarr; fail</td><td>Hard safety requirement; any criterion failing triggers block</td></tr>
+                <tr><td>Pass/fail per criterion</td><td>score_i &ge; 3 for all i</td><td>Regression CI; binary gate with failure attribution</td></tr>
+                <tr><td>Separate dashboards</td><td>Plot each criterion over time</td><td>Production monitoring; detect category-specific regressions</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">Constitutional eval in practice &mdash; Anthropic's usage</div>
+        <p>Anthropic's Constitutional AI uses a similar multi-criteria decomposition: the model critiques its own response against a list of named principles, then revises. The same technique generalised to eval: a judge model critiques a <em>different</em> model's response against the same principle list and returns structured per-criterion scores with rationale chains.</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-08">
+    <div class="slide-number">08</div>
+    <h2>Cost vs Quality &mdash; Sonnet vs Opus vs Open Models as Judges</h2>
+    <p>Choosing the right judge model is a cost-quality optimisation. More capable judges produce better-calibrated scores but cost significantly more per call.</p>
+
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Judge Model</th>
+                    <th>Input cost (2025)</th>
+                    <th>Human agreement</th>
+                    <th>Biases</th>
+                    <th>Best use case</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Claude 3.5 Sonnet</strong></td>
+                    <td>$3 / M input tokens</td>
+                    <td>~82&ndash;85&nbsp;% on conversational</td>
+                    <td>Moderate verbosity; low self-preference</td>
+                    <td>High-volume regression CI; daily monitoring</td>
+                </tr>
+                <tr>
+                    <td><strong>Claude 3 Opus</strong></td>
+                    <td>$15 / M input tokens</td>
+                    <td>~86&ndash;89&nbsp;% on hard tasks</td>
+                    <td>Lower biases; strong CoT rationale quality</td>
+                    <td>Monthly capability audits; golden-set curation</td>
+                </tr>
+                <tr>
+                    <td><strong>GPT-4o</strong></td>
+                    <td>$5 / M input tokens</td>
+                    <td>~83&ndash;86&nbsp;%</td>
+                    <td>Self-preference vs OpenAI models; positional bias documented</td>
+                    <td>Cross-vendor independent judge (not judging GPT-4 outputs)</td>
+                </tr>
+                <tr>
+                    <td><strong>Llama-3-70B-Instruct</strong></td>
+                    <td>$0.3&ndash;0.9 / M (hosted)</td>
+                    <td>~72&ndash;78&nbsp;% on simple tasks</td>
+                    <td>Higher verbosity bias; weaker CoT on complex rubrics</td>
+                    <td>First-pass triage; air-gapped / on-prem deployments</td>
+                </tr>
+                <tr>
+                    <td><strong>Prometheus-2-8x7B</strong></td>
+                    <td>$0.2&ndash;0.6 / M (hosted)</td>
+                    <td>~74&ndash;79&nbsp;% (specialised for eval)</td>
+                    <td>Fine-tuned to follow rubrics; less verbosity bias</td>
+                    <td>Cost-sensitive evals where rubric-following matters more than reasoning depth</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="callout">
+        <div class="callout-label">Practical hybrid strategy</div>
+        <p>Use <strong>Sonnet for 90&nbsp;% of scoring</strong> (CI, daily monitoring, regression checks). Reserve Opus or GPT-4o for: golden-set annotation, items where Sonnet score falls in the 2&ndash;3 borderline, and quarterly cross-validator runs. On a 2&thinsp;000-item golden set with 3&times; evaluation frequency, this saves ~$400/month vs all-Opus at comparable accuracy (empirically measured at &lt;1.5&nbsp;pp degradation).</p>
+    </div>
+</section>
+
+<section class="slide" id="slide-09">
+    <div class="slide-number">09</div>
+    <h2>What to Take Away</h2>
+    <ul>
+        <li><strong>LLM-as-judge fills the gap</strong> where reference-based metrics break down &mdash; open-ended generation, style, instruction-following, safety at scale.</li>
+        <li><strong>Mode matters.</strong> Pairwise for model selection; absolute scoring (Likert 1&ndash;5) for monitoring and regression CI.</li>
+        <li><strong>Prompt engineering drives accuracy.</strong> Rubric alone &lt; Rubric + exemplars &lt; CoT + structured output. Always include a rationale step.</li>
+        <li><strong>Four documented biases.</strong> Positional, verbosity, self-preference, sycophancy. Measure all four on your task before trusting any judge score.</li>
+        <li><strong>Mitigation is layered.</strong> Swap-order for positional; explicit rubric instruction for verbosity; cross-vendor judge for self-preference; no-opinion-signals for sycophancy.</li>
+        <li><strong>Calibrate against human labels.</strong> Target Spearman &rho; &ge; 0.75 before declaring a judge reliable. Re-calibrate after model updates.</li>
+        <li><strong>Constitutional eval</strong> gives per-criterion visibility &mdash; decompose quality into accuracy, completeness, safety, conciseness, grounding and score each independently.</li>
+        <li><strong>Cost-quality hybrid.</strong> Sonnet for 90&nbsp;% of volume; Opus for borderline items and quarterly audits.</li>
+    </ul>
+
+    <div class="callout">
+        <div class="callout-label">Where to next</div>
+        <p>Deck 03 surveys the major eval frameworks &mdash; Inspect AI, Braintrust, Phoenix (Arize), Langfuse, OpenAI Evals, and deepeval &mdash; and gives a decision matrix for picking the right tool for your infrastructure.</p>
+    </div>
+</section>
+
+<footer class="footer">
+    <p>Part of the <a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Evaluations">LLM Evaluations sub-hub</a></p>
+    <p style="margin-top: 0.5rem; font-size: 0.8rem;"><a href="https://github.com/BrendanJamesLynskey/LLM_Hub_Evaluations">Back to Series Index</a></p>
+</footer>
+<script>
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function (e) {
+            e.preventDefault();
+            const target = document.querySelector(this.getAttribute('href'));
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0)';
+            }
+        });
+    }, { threshold: 0.1 });
+    document.querySelectorAll('.slide').forEach(slide => {
+        slide.style.opacity = '0';
+        slide.style.transform = 'translateY(30px)';
+        slide.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+        observer.observe(slide);
+    });
+</script>
+</body>
+</html>
